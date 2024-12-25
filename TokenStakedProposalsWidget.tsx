@@ -1,0 +1,350 @@
+import React, { useState, useEffect } from "react"
+
+interface Proposal {
+  id: string
+  title: string
+  description: string
+  status: "open" | "passed" | "rejected" | "executed"
+  createdAt: string
+  completedAt?: string
+}
+
+const DAO_ADDRESS = "osmo1a40j922z0kwqhw2nn0nx66ycyk88vyzcs73fyjrd092cjgyvyjksrd8dp7"
+const CHAIN_ID = "osmosis-1"
+const BASE_URL = "https://indexer.daodao.zone"
+
+const formatDate = (dateString: string): string => {
+  try {
+    return new Date(dateString).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  } catch (e) {
+    return "Invalid date"
+  }
+}
+
+const VOTE_OPTIONS = [
+  { type: "yes", color: "#22c55e", uniqueId: "vote-yes" },
+  { type: "no", color: "#ef4444", uniqueId: "vote-no" },
+]
+
+function ProposalCard({
+  proposal,
+  isExpanded,
+  onToggle,
+  onVote,
+  walletAddress,
+}: {
+  proposal: Proposal
+  isExpanded: boolean
+  onToggle: () => void
+  onVote?: (proposalId: string, vote: "yes" | "no") => void
+  walletAddress?: string | null
+}) {
+  return (
+    <div
+      data-proposal-id={proposal.id}
+      style={{
+        marginBottom: "16px",
+        backgroundColor: "#ffffff",
+        borderRadius: "12px",
+        border: "1px solid #e5e7eb",
+        transition: "all 0.2s ease",
+        cursor: "pointer",
+        boxShadow: isExpanded ? "0 4px 6px rgba(0, 0, 0, 0.1)" : "none",
+      }}
+      onClick={onToggle}
+    >
+      <div
+        style={{
+          padding: "16px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          borderBottom: isExpanded ? "1px solid #e5e7eb" : "none",
+        }}
+      >
+        <div style={{ flex: 1 }}>
+          <div
+            style={{
+              fontSize: "16px",
+              fontWeight: "600",
+              color: "#111827",
+              marginBottom: "4px",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            <span>#{proposal.id}</span>
+            <span>{proposal.title}</span>
+          </div>
+
+          {!isExpanded && (
+            <div
+              style={{
+                fontSize: "14px",
+                color: "#6b7280",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {proposal.description.slice(0, 100)}...
+            </div>
+          )}
+        </div>
+
+        <div
+          style={{
+            padding: "6px 12px",
+            borderRadius: "20px",
+            fontSize: "13px",
+            fontWeight: "500",
+            backgroundColor:
+              proposal.status === "passed"
+                ? "#dcfce7"
+                : proposal.status === "rejected"
+                ? "#fee2e2"
+                : proposal.status === "open"
+                ? "#fff7ed"
+                : "#f3f4f6",
+            color:
+              proposal.status === "passed"
+                ? "#166534"
+                : proposal.status === "rejected"
+                ? "#991b1b"
+                : proposal.status === "open"
+                ? "#9a3412"
+                : "#374151",
+            marginLeft: "12px",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {proposal.status.charAt(0).toUpperCase() + proposal.status.slice(1)}
+        </div>
+      </div>
+
+      {isExpanded && (
+        <>
+          <div
+            style={{
+              padding: "16px",
+              backgroundColor: "#f9fafb",
+              borderBottomLeftRadius: "12px",
+              borderBottomRightRadius: "12px",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "15px",
+                lineHeight: "1.6",
+                color: "#374151",
+                marginBottom: "16px",
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {proposal.description}
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontSize: "13px",
+                color: "#6b7280",
+                borderTop: "1px solid #e5e7eb",
+                paddingTop: "12px",
+                marginTop: "12px",
+              }}
+            >
+              <div>
+                <span style={{ fontWeight: "500" }}>Created:</span>{" "}
+                {formatDate(proposal.createdAt)}
+              </div>
+              {proposal.completedAt && (
+                <div>
+                  <span style={{ fontWeight: "500" }}>Completed:</span>{" "}
+                  {formatDate(proposal.completedAt)}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {proposal.status === "open" && walletAddress && (
+            <div style={{ padding: "16px", borderTop: "1px solid #e5e7eb" }}>
+              <div style={{ display: "flex", gap: "8px", justifyContent: "center" }}>
+                {VOTE_OPTIONS.map((voteOption) => (
+                  <button
+                    key={`vote-${proposal.id}-${voteOption.uniqueId}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      console.log("Vote button clicked", proposal.id, voteOption.type)
+                      onVote?.(proposal.id, voteOption.type as "yes" | "no")
+                    }}
+                    style={{
+                      padding: "8px 16px",
+                      backgroundColor: voteOption.color,
+                      color: "white",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {`Vote ${voteOption.type.charAt(0).toUpperCase() + voteOption.type.slice(1)}`}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+export default function ProposalsWidget({ onVote }: ProposalsWidgetProps) {
+  const [proposals, setProposals] = useState<Proposal[]>([])
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+  const [loading, setLoading] = useState<boolean>(true)
+  const [error, setError] = useState<string | null>(null)
+  const [walletAddress, setWalletAddress] = useState<string | null>(null)
+
+  const connectKeplr = async () => {
+    if (!window.keplr) return
+     window.keplr.enable(CHAIN_ID)
+    const offlineSigner = window.keplr.getOfflineSigner(CHAIN_ID)
+    const accounts = await offlineSigner.getAccounts()
+    setWalletAddress(accounts[0].address)
+  }
+
+  useEffect(() => {
+    const fetchProposals = async () => {
+      try {
+        // First get the proposal module address
+        const moduleUrl = `${BASE_URL}/${CHAIN_ID}/contract/${DAO_ADDRESS}/daoCore/proposalModules`
+        const moduleRes = await fetch(moduleUrl)
+        const moduleData = await moduleRes.json()
+        
+        // Get the proposal module address
+        const proposalModuleAddress = moduleData[0].address
+        
+        // Now fetch proposals using this address
+        const proposalsUrl = `${BASE_URL}/${CHAIN_ID}/contract/${proposalModuleAddress}/daoProposalSingle/listProposals`
+        const proposalsRes = await fetch(proposalsUrl)
+        const proposalsData = await proposalsRes.json()
+        console.log('Proposals from module:', proposalsData)
+
+        if (Array.isArray(proposalsData)) {
+          const processedProposals: Proposal[] = proposalsData
+            .map((p) => ({
+              id: p.id,
+              title: p.proposal?.title || "Untitled Proposal",
+              description: p.proposal?.description || "No description provided",
+              status: (p.proposal?.status || "unknown") as Proposal["status"],
+              createdAt: p.createdAt,
+              completedAt: p.completedAt,
+            }))
+            .reverse()
+
+          setProposals(processedProposals)
+        }
+      } catch (err) {
+        setError(`Failed to load proposals: ${err instanceof Error ? err.message : String(err)}`)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchProposals()
+    const interval = setInterval(fetchProposals, 30000)
+    return () => clearInterval(interval)
+  }, [])
+  const toggleProposal = (id: string) => {
+    setExpandedIds((prev) => {
+      const newSet = new Set(prev)
+      if (newSet.has(id)) {
+        newSet.delete(id)
+      } else {
+        newSet.add(id)
+      }
+      return newSet
+    })
+  }
+
+  if (loading) return <div>Loading proposals...</div>
+
+  return (
+    <div key="framer-proposals-root" data-framer-component-type="proposals">
+      <div style={{ textAlign: "center", marginBottom: "20px" }}>
+        {!walletAddress ? (
+          <button
+            onClick={connectKeplr}
+            style={{
+              padding: "12px 24px",
+              backgroundColor: "#3b82f6",
+              color: "white",
+              borderRadius: "8px",
+              cursor: "pointer",
+            }}
+          >
+            Connect Keplr
+          </button>
+        ) : (
+          <div style={{ fontSize: "14px", color: "#4b5563" }}>
+            Connected: {walletAddress.slice(0, 8)}...{walletAddress.slice(-6)}
+          </div>
+        )}
+      </div>
+
+      <h2
+        style={{
+          fontSize: "24px",
+          fontWeight: "bold",
+          marginBottom: "24px",
+          textAlign: "center",
+          color: "#111827",
+        }}
+      >
+        Proposals ({proposals.length})
+      </h2>
+
+      <div
+        style={{
+          maxHeight: "800px",
+          overflowY: "auto",
+          padding: "4px",
+        }}
+      >
+        {proposals.map((proposal) => (
+          <ProposalCard
+            key={`proposal-${proposal.id}-${proposal.createdAt}`}
+            proposal={proposal}
+            isExpanded={expandedIds.has(proposal.id)}
+            onToggle={() => toggleProposal(proposal.id)}
+            onVote={onVote}
+            walletAddress={walletAddress}
+          />
+        ))}
+      </div>
+
+      {error && (
+        <div
+          style={{
+            marginTop: "20px",
+            padding: "12px",
+            backgroundColor: "#fee2e2",
+            borderRadius: "8px",
+            color: "#991b1b",
+            textAlign: "center",
+          }}
+        >
+          {error}
+        </div>
+      )}
+    </div>
+  )
+}
